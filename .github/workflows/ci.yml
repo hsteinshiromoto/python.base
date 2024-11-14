@@ -1,0 +1,105 @@
+
+name: CI
+
+# Controls when the action will run.
+on:
+  # Triggers the workflow on push or pull request events but only for the master branch
+  push:
+
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: python.base
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  build_docker_image:
+    name: Build docker image and push
+    runs-on: ubuntu-latest
+    outputs:
+      output1: ${{ steps.changed_files.outputs.build_image }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Detect file changes: https://stackoverflow.com/questions/70708306/github-actions-run-step-job-in-a-workflow-if-changes-happen-in-specific-folde
+      - name: Detecting file changes
+        uses: dorny/paths-filter@v2
+        id: changed_files
+        with:
+          # base: dev
+          filters: |
+            build_image:
+              - 'Dockerfile'
+              - 'Makefile'
+
+      - name: Login to Docker Hub
+        if: steps.changed_files.outputs.build_image == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ghcr.io
+
+      - name: Build docker image if any of those files changes
+        if: steps.changed_files.outputs.build_image == 'true'
+        run: |
+          make image
+
+      - name: Push to Github Docker Registry
+        id: PushGithubRegistry
+        if: steps.changed_files.outputs.build_image == 'true'
+        continue-on-error: true
+        run: |
+          IMAGE_ID=ghcr.io/${{ github.repository }}/$IMAGE_NAME
+
+          # Change all uppercase to lowercase
+          IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
+
+          # Strip git ref prefix from version
+          VERSION=$(git ls-files -s Dockerfile | awk '{print $2}' | cut -c1-16)
+
+          echo IMAGE_ID=$IMAGE_ID
+          echo VERSION=$VERSION
+          echo IMAGE_NAME=$IMAGE_NAME
+
+          docker tag $IMAGE_ID:$VERSION $IMAGE_ID:latest
+          docker tag ghcr.io/${{ github.repository }}/$IMAGE_NAME:$VERSION ghcr.io/${{ github.repository }}/$IMAGE_NAME:latest
+
+          docker push ghcr.io/${{ github.repository }}/$IMAGE_NAME:$VERSION
+          docker push ghcr.io/${{ github.repository }}/$IMAGE_NAME:latest 
+          docker push $IMAGE_ID:$VERSION
+          docker push $IMAGE_ID:latest
+      
+      - name: login to docker hub
+        if: steps.changed_files.outputs.build_image == 'true'        
+        id: docker-hub
+        env:
+          username: ${{secrets.DOCKERHUB_USR}}
+          password: ${{secrets.DOCKERHUB_PWD}}
+        run: |
+          docker login -u $username -p $password  
+
+      - name: Push to Docker Hub
+        if: steps.changed_files.outputs.build_image == 'true'
+        run: |
+          IMAGE_ID=ghcr.io/${{ github.repository }}/python.base
+
+          # Change all uppercase to lowercase
+          IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
+
+          # Strip git ref prefix from version
+          VERSION=$(git ls-files -s Dockerfile | awk '{print $2}' | cut -c1-16)
+
+          echo IMAGE_ID=$IMAGE_ID
+          echo VERSION=$VERSION
+
+          docker tag $IMAGE_ID:$VERSION ${{secrets.DOCKERHUB_USR}}/python.base:$VERSION
+
+          docker push ${{secrets.DOCKERHUB_USR}}/python.base:$VERSION 
+
+          docker tag ${{secrets.DOCKERHUB_USR}}/python.base:$VERSION ${{secrets.DOCKERHUB_USR}}/python.base:latest
+
+          docker push ${{secrets.DOCKERHUB_USR}}/python.base:latest
